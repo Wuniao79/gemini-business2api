@@ -21,7 +21,6 @@ export const useAccountsStore = defineStore('accounts', () => {
   const isLoading = ref(false)
   const operatingAccounts = ref<Set<string>>(new Set())
   const batchProgress = ref<{ current: number; total: number } | null>(null)
-  const migrationNotice = ref<string | null>(null)
 
   const isOperating = computed(() => operatingAccounts.value.size > 0)
 
@@ -35,9 +34,6 @@ export const useAccountsStore = defineStore('accounts', () => {
         accounts.value = response
       } else {
         accounts.value = response.accounts || []
-        if (response.migration_notice?.message) {
-          migrationNotice.value = response.migration_notice.message
-        }
       }
     } finally {
       isLoading.value = false
@@ -180,7 +176,6 @@ export const useAccountsStore = defineStore('accounts', () => {
     isLoading,
     isOperating,
     batchProgress,
-    migrationNotice,
     loadAccounts,
     deleteAccount,
     disableAccount,

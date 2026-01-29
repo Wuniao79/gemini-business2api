@@ -26,30 +26,6 @@
       </div>
     </Teleport>
 
-    <Teleport to="body">
-      <div
-        v-if="isMigrationNoticeOpen"
-        class="fixed inset-0 z-[210] flex items-center justify-center bg-background/90 backdrop-blur-sm"
-      >
-        <div class="max-w-lg rounded-2xl border border-border bg-card p-8 shadow-xl">
-          <h2 class="text-lg font-semibold text-foreground">数据迁移提示</h2>
-          <p class="mt-3 text-sm text-muted-foreground">
-            {{ migrationMessage || '已完成账户数据迁移到数据库。' }}
-          </p>
-          <div class="mt-6 flex justify-end">
-            <button
-              type="button"
-              class="rounded-full border border-border px-4 py-2 text-sm font-medium text-foreground transition-colors
-                     hover:border-primary hover:text-primary"
-              @click="isMigrationNoticeOpen = false"
-            >
-              我知道了
-            </button>
-          </div>
-        </div>
-      </div>
-    </Teleport>
-
     <section class="rounded-3xl border border-border bg-card p-6">
       <div class="flex flex-wrap items-center justify-between gap-4">
         <div class="grid w-full grid-cols-2 gap-3 sm:flex sm:w-auto sm:items-center">
@@ -1190,7 +1166,7 @@ import { mailProviderOptions, defaultMailProvider } from '@/constants/mailProvid
 import type { AdminAccount, AccountConfigItem, RegisterTask, LoginTask } from '@/types/api'
 
 const accountsStore = useAccountsStore()
-const { accounts, isLoading, isOperating, batchProgress, migrationNotice } = storeToRefs(accountsStore)
+const { accounts, isLoading, isOperating, batchProgress } = storeToRefs(accountsStore)
 const settingsStore = useSettingsStore()
 const { settings } = storeToRefs(settingsStore)
 const confirmDialog = useConfirmDialog()
@@ -1245,8 +1221,6 @@ const taskLogsRef = ref<HTMLDivElement | null>(null)
 const isRegistering = ref(false)
 const isRefreshing = ref(false)
 const automationError = ref('')
-const isMigrationNoticeOpen = ref(false)
-const migrationMessage = ref('')
 const REGISTER_TASK_CACHE_KEY = 'accounts-register-task-cache'
 const LOGIN_TASK_CACHE_KEY = 'accounts-login-task-cache'
 const REGISTER_CLEAR_KEY = 'accounts-register-log-clear'
@@ -1301,11 +1275,6 @@ watch([searchQuery, statusFilter], () => {
 
 const refreshAccounts = async () => {
   await accountsStore.loadAccounts()
-  if (migrationNotice.value) {
-    migrationMessage.value = migrationNotice.value
-    isMigrationNoticeOpen.value = true
-    migrationNotice.value = null
-  }
   selectedIds.value = new Set()
   showMoreActions.value = false
 }

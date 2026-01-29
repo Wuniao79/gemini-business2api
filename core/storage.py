@@ -11,24 +11,16 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import sqlite3
 import threading
 import time
 from typing import Optional
-
-import yaml
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
-
-MIGRATION_NOTICE_MESSAGE = (
-    "新版本已切换为数据库存储，自动完成历史配置迁移。"
-    "所以相关文件已迁移并备份到 data/backup。"
-)
 
 _db_pool = None
 _db_pool_lock = None
@@ -38,8 +30,6 @@ _db_loop_lock = threading.Lock()
 
 _sqlite_conn = None
 _sqlite_lock = threading.Lock()
-_migration_notice = None
-_migration_notice_lock = threading.Lock()
 
 
 def _get_database_url() -> str:
@@ -61,21 +51,6 @@ def _get_backend() -> str:
         return "sqlite"
     return ""
 
-def set_migration_notice(message: str) -> None:
-    global _migration_notice
-    if not message:
-        return
-    with _migration_notice_lock:
-        if _migration_notice is None:
-            _migration_notice = message
-
-def pop_migration_notice() -> Optional[str]:
-    global _migration_notice
-    with _migration_notice_lock:
-        message = _migration_notice
-        _migration_notice = None
-        return message
-
 def is_database_enabled() -> bool:
     """Return True when a database backend is configured."""
     return bool(_get_backend())
@@ -93,106 +68,6 @@ def _ensure_backend_initialized() -> None:
     if backend == "sqlite":
         _get_sqlite_conn()
         return
-
-
-def _database_has_content() -> bool:
-    try:
-        return bool(has_accounts_sync()) or bool(has_settings_sync()) or bool(has_stats_sync())
-    except Exception as e:
-        logger.error(f"[STORAGE] Database content check failed: {e}")
-        return True
-
-
-def _load_json_file(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _load_yaml_file(path: str):
-    with open(path, "r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    return data or {}
-
-
-def _backup_file(path: str) -> Optional[str]:
-    if not os.path.exists(path):
-        return None
-    backup_dir = os.path.join("data", "backup")
-    os.makedirs(backup_dir, exist_ok=True)
-    filename = os.path.basename(path)
-    dest = os.path.join(backup_dir, filename)
-    if os.path.exists(dest):
-        ts = time.strftime("%Y%m%d-%H%M%S")
-        dest = os.path.join(backup_dir, f"{filename}.{ts}")
-    shutil.move(path, dest)
-    return dest
-
-
-def migrate_local_files_if_needed() -> None:
-    if not is_database_enabled():
-        return
-    if os.environ.get("ACCOUNTS_CONFIG"):
-        return
-    try:
-        _ensure_backend_initialized()
-    except Exception as e:
-        logger.error(f"[STORAGE] Database init failed: {e}")
-        return
-
-    if _database_has_content():
-        logger.info("[STORAGE] Database has data; skipping local file migration")
-        return
-
-    accounts_path = _data_file_path("accounts.json")
-    settings_path = _data_file_path("settings.yaml")
-    stats_path = _data_file_path("stats.json")
-
-    has_local_files = (
-        os.path.exists(accounts_path)
-        or os.path.exists(settings_path)
-        or os.path.exists(stats_path)
-    )
-    if not has_local_files:
-        logger.info("[STORAGE] No local data files found; using empty database")
-        return
-
-    migrated_any = False
-
-    if os.path.exists(accounts_path):
-        try:
-            accounts_data = _load_json_file(accounts_path)
-            if isinstance(accounts_data, list):
-                if save_accounts_sync(accounts_data):
-                    _backup_file(accounts_path)
-                    migrated_any = True
-                    logger.info(f"[STORAGE] Migrated accounts from {accounts_path}")
-        except Exception as e:
-            logger.error(f"[STORAGE] Accounts migration failed: {e}")
-
-    if os.path.exists(settings_path):
-        try:
-            settings_data = _load_yaml_file(settings_path)
-            if isinstance(settings_data, dict):
-                if save_settings_sync(settings_data):
-                    _backup_file(settings_path)
-                    migrated_any = True
-                    logger.info(f"[STORAGE] Migrated settings from {settings_path}")
-        except Exception as e:
-            logger.error(f"[STORAGE] Settings migration failed: {e}")
-
-    if os.path.exists(stats_path):
-        try:
-            stats_data = _load_json_file(stats_path)
-            if isinstance(stats_data, dict):
-                if save_stats_sync(stats_data):
-                    _backup_file(stats_path)
-                    migrated_any = True
-                    logger.info(f"[STORAGE] Migrated stats from {stats_path}")
-        except Exception as e:
-            logger.error(f"[STORAGE] Stats migration failed: {e}")
-
-    if migrated_any:
-        set_migration_notice(MIGRATION_NOTICE_MESSAGE)
 
 
 async def has_accounts() -> Optional[bool]:
@@ -545,8 +420,12 @@ async def _save_accounts_to_table(accounts: list) -> bool:
 
 async def load_accounts() -> Optional[list]:
     """
-    Load account configuration from database when enabled.
-    Return None to indicate file-based fallback.
+    从数据库加载账户配置（如果启用）
+
+    注意：不再自动从 kv_store 迁移
+    如需迁移，请手动运行：python scripts/migrate_to_database.py
+
+    返回 None 表示降级到文件存储
     """
     if not is_database_enabled():
         return None
@@ -554,13 +433,15 @@ async def load_accounts() -> Optional[list]:
         data = await _load_accounts_from_table()
         if data is None:
             return None
+
         if data:
-            logger.info(f"[STORAGE] Loaded {len(data)} accounts from database")
-            return data
-        logger.info("[STORAGE] No accounts found in database")
-        return []
+            logger.info(f"[STORAGE] 从数据库加载 {len(data)} 个账户")
+        else:
+            logger.info("[STORAGE] 数据库中未找到账户")
+
+        return data
     except Exception as e:
-        logger.error(f"[STORAGE] Database read failed: {e}")
+        logger.error(f"[STORAGE] 数据库读取失败: {e}")
     return None
 
 
@@ -831,6 +712,7 @@ def delete_accounts_sync(account_ids: list[str]) -> int:
 # ==================== Settings storage ====================
 
 async def _load_kv(table_name: str, key: str) -> Optional[dict]:
+    """加载键值数据"""
     backend = _get_backend()
     if backend == "postgres":
         pool = await _get_pool()
@@ -845,6 +727,7 @@ async def _load_kv(table_name: str, key: str) -> Optional[dict]:
         if isinstance(value, str):
             return json.loads(value)
         return value
+
     if backend == "sqlite":
         conn = _get_sqlite_conn()
         with _sqlite_lock:
@@ -1095,6 +978,3 @@ def load_task_history_sync(limit: int = 100) -> Optional[list]:
 
 def clear_task_history_sync() -> int:
     return _run_in_db_loop(clear_task_history())
-
-
-migrate_local_files_if_needed()

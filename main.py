@@ -1150,11 +1150,7 @@ async def admin_get_accounts(request: Request):
             "quota_status": quota_status  # 新增配额状态
         })
 
-    migration_notice = storage.pop_migration_notice()
-    payload = {"total": len(accounts_info), "accounts": accounts_info}
-    if migration_notice:
-        payload["migration_notice"] = {"message": migration_notice}
-    return payload
+    return {"total": len(accounts_info), "accounts": accounts_info}
 
 @app.get("/admin/accounts-config")
 @require_login()
